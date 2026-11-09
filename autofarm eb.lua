@@ -36,15 +36,15 @@ local Destinations = {
     [3] = Vector3.new(1657.4124, 1.3496, -545.7861)
 }
 
--- Rota única (apenas 1 ponto de entrega)
+-- Rota única (apenas 1 ponto de entrega — agora usando a Rota 3)
 local Routes = {
     [1] = {
         Waypoints = {
-            Vector3.new(2837.0276, 1.3500, -183.4026),
-            Vector3.new(2868.2947, 1.3496, -236.4743),
-            Vector3.new(2945.3516, 1.3500, -344.0660)
+            Vector3.new(1735.0505, 1.2496, -471.7930),
+            Vector3.new(1688.8496, 1.3496, -558.1766),
+            Vector3.new(1657.4124, 1.3496, -545.7861)
         },
-        Target = Destinations[1]
+        Target = Destinations[3]
     }
 }
 
@@ -151,7 +151,7 @@ local TitleText = Instance.new("TextLabel")
 TitleText.Size = UDim2.new(1, -20, 1, 0)
 TitleText.Position = UDim2.new(0, 15, 0, 0)
 TitleText.BackgroundTransparency = 1
-TitleText.Text = "Exclusive" -- Nome alterado para Exclusive
+TitleText.Text = "Exclusive"
 TitleText.TextColor3 = Color3.fromRGB(255, 255, 255)
 TitleText.Font = Enum.Font.GothamBold
 TitleText.TextSize = 16
@@ -336,23 +336,17 @@ local function deliverAtCircle(targetPos)
     local humanoid = character:FindFirstChildOfClass("Humanoid")
     local rootPart = character.HumanoidRootPart
 
-    -- Vai até o centro do círculo/destino
     walkTo(targetPos, 1.5, 15)
-
     if not isFarming then return end
 
-    -- Executa micropassos laterais (esquerda e direita) para forçar o registro da colisão e do prompt
     local rightOffset = targetPos + (rootPart.CFrame.RightVector * 3)
     walkTo(rightOffset, 1.0, 3)
-
     if not isFarming then return end
 
     local leftOffset = targetPos - (rootPart.CFrame.RightVector * 3)
     walkTo(leftOffset, 1.0, 3)
-
     if not isFarming then return end
 
-    -- Retorna ao alvo exato e interage/dispara prompts repetidas vezes
     walkTo(targetPos, 1.0, 5)
 
     local startTime = tick()
@@ -393,21 +387,69 @@ task.spawn(function()
             local waypointsList = currentRoute.Waypoints
             local waypointsCount = #waypointsList
 
-            -- 3. PERCURSO DE IDA: Vai até o destino
-            for i = 1, waypointsCount do
+            -- 3. PERCURSO DE IDA (com curva W+A 9s após sair da caixa por 3s)
+            local departureTime = tick()
+            local curveDone = false
+            local firstWp = waypointsList[1]
+
+            -- Caminha até o 1º waypoint monitorando o tempo para inserir a curva
+            while isFarming do
+                local char = LocalPlayer.Character
+                if not char or not char:FindFirstChild("HumanoidRootPart") then break end
+                local humanoid = char:FindFirstChildOfClass("Humanoid")
+                local rootPart = char.HumanoidRootPart
+
+                local currentPos = rootPart.Position
+                local dist = (Vector3.new(currentPos.X, 0, currentPos.Z) - Vector3.new(firstWp.X, 0, firstWp.Z)).Magnitude
+
+                if dist <= 3.5 then break end
+
+                -- Curva W+A (diagonal frente-esquerda) exatamente aos 9s, por 3s
+                if not curveDone and (tick() - departureTime) >= 9 then
+                    curveDone = true
+
+                    -- Calcula direção diagonal UMA VEZ, baseada no rumo atual até o waypoint
+                    local toWp = firstWp - currentPos
+                    local flatToWp = Vector3.new(toWp.X, 0, toWp.Z)
+                    if flatToWp.Magnitude > 0.1 then
+                        flatToWp = flatToWp.Unit
+                        local facingCF = CFrame.lookAt(Vector3.zero, flatToWp)
+                        local leftVec = -facingCF.RightVector
+                        local diagDir = (flatToWp + leftVec).Unit  -- W+A = 45° frente-esquerda
+
+                        local curveEnd = tick() + 3
+                        while tick() < curveEnd and isFarming do
+                            local c = LocalPlayer.Character
+                            if not c then break end
+                            local h = c:FindFirstChildOfClass("Humanoid")
+                            local r = c:FindFirstChild("HumanoidRootPart")
+                            if not h or not r then break end
+                            h:MoveTo(r.Position + diagDir * 20)
+                            task.wait(0.05)
+                        end
+                    end
+                end
+
+                disableSmallCollisions()
+                humanoid:MoveTo(firstWp)
+                task.wait(0.1)
+            end
+
+            -- Percorre os waypoints restantes normalmente
+            for i = 2, waypointsCount do
                 walkTo(waypointsList[i], 3.5, 20)
                 if not isFarming then break end
                 task.wait(0.1)
             end
 
-            -- 4. Realiza a entrega no destino com os passos laterais de confirmação
+            -- 4. Realiza a entrega no destino
             if isFarming then
                 deliverAtCircle(currentRoute.Target)
             end
 
             task.wait(0.3)
 
-            -- 5. PERCURSO DE VOLTA: Retorna pelo mesmo caminho até a origem da caixa
+            -- 5. PERCURSO DE VOLTA
             for i = waypointsCount, 1, -1 do
                 walkTo(waypointsList[i], 3.5, 20)
                 if not isFarming then break end
@@ -416,7 +458,6 @@ task.spawn(function()
 
             walkTo(BoxPickupPos, 2.0, 20)
             task.wait(0.4)
-            -- (sem avanço de rota — sempre repete o mesmo ponto)
         else
             task.wait(0.5)
         end
